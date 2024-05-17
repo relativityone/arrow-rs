@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `arrow-cast/src/cast/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-46f98efaafac5295.ttf.woff2,FiraSans-Regular-018c141bf0843ffd.woff2,FiraSans-Medium-8f9a781e4970d388.woff2,SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2,SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dd39b87e5fcfba68.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="arrow_cast" data-themes="" data-resource-suffix="" data-rustdoc-version="1.80.0-nightly (ef0027897 2024-05-12)" data-channel="nightly" data-search-js="search-d52510db62a78183.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../static.files/storage-118b08c4c78b968e.js"></script><script defer src="../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-20a3ad099b048cf2.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-df360f571f6edeae.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `arrow-cast/src/cast/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-46f98efaafac5295.ttf.woff2,FiraSans-Regular-018c141bf0843ffd.woff2,FiraSans-Medium-8f9a781e4970d388.woff2,SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2,SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-dd39b87e5fcfba68.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="arrow_cast" data-themes="" data-resource-suffix="" data-rustdoc-version="1.80.0-nightly (8c127df75 2024-05-16)" data-channel="nightly" data-search-js="search-d52510db62a78183.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../static.files/storage-118b08c4c78b968e.js"></script><script defer src="../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-20a3ad099b048cf2.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-df360f571f6edeae.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -8912,6 +8912,34 @@
 <a href="#8912" id="8912">8912</a>
 <a href="#8913" id="8913">8913</a>
 <a href="#8914" id="8914">8914</a>
+<a href="#8915" id="8915">8915</a>
+<a href="#8916" id="8916">8916</a>
+<a href="#8917" id="8917">8917</a>
+<a href="#8918" id="8918">8918</a>
+<a href="#8919" id="8919">8919</a>
+<a href="#8920" id="8920">8920</a>
+<a href="#8921" id="8921">8921</a>
+<a href="#8922" id="8922">8922</a>
+<a href="#8923" id="8923">8923</a>
+<a href="#8924" id="8924">8924</a>
+<a href="#8925" id="8925">8925</a>
+<a href="#8926" id="8926">8926</a>
+<a href="#8927" id="8927">8927</a>
+<a href="#8928" id="8928">8928</a>
+<a href="#8929" id="8929">8929</a>
+<a href="#8930" id="8930">8930</a>
+<a href="#8931" id="8931">8931</a>
+<a href="#8932" id="8932">8932</a>
+<a href="#8933" id="8933">8933</a>
+<a href="#8934" id="8934">8934</a>
+<a href="#8935" id="8935">8935</a>
+<a href="#8936" id="8936">8936</a>
+<a href="#8937" id="8937">8937</a>
+<a href="#8938" id="8938">8938</a>
+<a href="#8939" id="8939">8939</a>
+<a href="#8940" id="8940">8940</a>
+<a href="#8941" id="8941">8941</a>
+<a href="#8942" id="8942">8942</a>
 </pre></div><pre class="rust"><code><span class="comment">// Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -16969,6 +16997,34 @@
         <span class="kw">let </span>overflow_array = Arc::new(overflow_str_array) <span class="kw">as </span>ArrayRef;
 
         test_cast_string_to_decimal256_overflow(overflow_array);
+    }
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>test_cast_outside_supported_range_for_nanoseconds() {
+        <span class="kw">const </span>EXPECTED_ERROR_MESSAGE: <span class="kw-2">&amp;</span>str = <span class="string">"The dates that can be represented as nanoseconds have to be between 1677-09-21T00:12:44.0 and 2262-04-11T23:47:16.854775804"</span>;
+
+        <span class="kw">let </span>array = StringArray::from(<span class="macro">vec!</span>[<span class="prelude-val">Some</span>(<span class="string">"1650-01-01 01:01:01.000001"</span>)]);
+
+        <span class="kw">let </span>cast_options = CastOptions {
+            safe: <span class="bool-val">false</span>,
+            format_options: FormatOptions::default(),
+        };
+
+        <span class="kw">let </span>result = cast_string_to_timestamp::&lt;i32, TimestampNanosecondType&gt;(
+            <span class="kw-2">&amp;</span>array,
+            <span class="kw-2">&amp;</span><span class="prelude-val">None</span>::&lt;Arc&lt;str&gt;&gt;,
+            <span class="kw-2">&amp;</span>cast_options,
+        );
+
+        <span class="kw">let </span>err = result.unwrap_err();
+        <span class="macro">assert_eq!</span>(
+            err.to_string(),
+            <span class="macro">format!</span>(
+                <span class="string">"Cast error: Overflow converting {} to Nanosecond. {}"</span>,
+                array.value(<span class="number">0</span>),
+                EXPECTED_ERROR_MESSAGE
+            )
+        );
     }
 
     <span class="attr">#[test]
