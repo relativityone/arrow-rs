@@ -200,7 +200,6 @@ impl FlightSqlService for FlightSqlServiceImpl {
     async fn do_get_fallback(
         &self,
         request: Request<Ticket>,
-        _message: Any,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         self.check_token(&request)?;
         let batch = Self::fake_result().map_err(|e| status!("Could not fake a result", e))?;
