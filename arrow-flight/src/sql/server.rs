@@ -699,7 +699,7 @@ where
         // we wrap this stream in a `Peekable` one, which allows us to peek at
         // the first message without discarding it.
         let mut request = request.map(PeekableFlightDataStream::new);
-        let cmd_opt = Pin::new(request.get_mut()).peek().await.map(|x| x.map(|x| x.clone()));
+        let cmd_opt = Pin::new(request.get_mut()).peek().await.map(|x| x.clone());
 
         if let Some(Ok(cmd)) = cmd_opt {
             let message_result =
