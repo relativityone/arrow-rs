@@ -705,59 +705,63 @@ where
         // we wrap this stream in a `Peekable` one, which allows us to peek at
         // the first message without discarding it.
         let mut request = request.map(PeekableFlightDataStream::new);
-        let cmd = Pin::new(request.get_mut()).peek().await.unwrap().clone()?;
+        let cmd_opt = Pin::new(request.get_mut()).peek().await.map(|x| x.clone());
 
-        let message_result =
-            Any::decode(&*cmd.flight_descriptor.unwrap().cmd).map_err(decode_error_to_status);
+        if let Some(Ok(cmd)) = cmd_opt {
+            let message_result =
+                Any::decode(&*cmd.flight_descriptor.unwrap().cmd).map_err(decode_error_to_status);
 
-        match message_result {
-            Err(_) => self.do_put_fallback(request).await,
-            Ok(message) => match Command::try_from(message).map_err(arrow_error_to_status)? {
-                Command::CommandStatementUpdate(command) => {
-                    let record_count = self.do_put_statement_update(command, request).await?;
-                    let result = DoPutUpdateResult { record_count };
-                    let output = futures::stream::iter(vec![Ok(PutResult {
-                        app_metadata: result.as_any().encode_to_vec().into(),
-                    })]);
-                    Ok(Response::new(Box::pin(output)))
+            match message_result {
+                Err(_) => self.do_put_fallback(request).await,
+                Ok(message) => match Command::try_from(message).map_err(arrow_error_to_status)? {
+                    Command::CommandStatementUpdate(command) => {
+                        let record_count = self.do_put_statement_update(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandStatementIngest(command) => {
+                        let record_count = self.do_put_statement_ingest(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandPreparedStatementQuery(command) => {
+                        let result = self
+                            .do_put_prepared_statement_query(command, request)
+                            .await?;
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandStatementSubstraitPlan(command) => {
+                        let record_count = self.do_put_substrait_plan(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandPreparedStatementUpdate(command) => {
+                        let record_count = self
+                            .do_put_prepared_statement_update(command, request)
+                            .await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    _ => self.do_put_fallback(request).await,
                 }
-                Command::CommandStatementIngest(command) => {
-                    let record_count = self.do_put_statement_ingest(command, request).await?;
-                    let result = DoPutUpdateResult { record_count };
-                    let output = futures::stream::iter(vec![Ok(PutResult {
-                        app_metadata: result.as_any().encode_to_vec().into(),
-                    })]);
-                    Ok(Response::new(Box::pin(output)))
-                }
-                Command::CommandPreparedStatementQuery(command) => {
-                    let result = self
-                        .do_put_prepared_statement_query(command, request)
-                        .await?;
-                    let output = futures::stream::iter(vec![Ok(PutResult {
-                        app_metadata: result.encode_to_vec().into(),
-                    })]);
-                    Ok(Response::new(Box::pin(output)))
-                }
-                Command::CommandStatementSubstraitPlan(command) => {
-                    let record_count = self.do_put_substrait_plan(command, request).await?;
-                    let result = DoPutUpdateResult { record_count };
-                    let output = futures::stream::iter(vec![Ok(PutResult {
-                        app_metadata: result.as_any().encode_to_vec().into(),
-                    })]);
-                    Ok(Response::new(Box::pin(output)))
-                }
-                Command::CommandPreparedStatementUpdate(command) => {
-                    let record_count = self
-                        .do_put_prepared_statement_update(command, request)
-                        .await?;
-                    let result = DoPutUpdateResult { record_count };
-                    let output = futures::stream::iter(vec![Ok(PutResult {
-                        app_metadata: result.as_any().encode_to_vec().into(),
-                    })]);
-                    Ok(Response::new(Box::pin(output)))
-                }
-                _ => self.do_put_fallback(request).await,
             }
+        } else {
+            self.do_put_fallback(request).await
         }
     }
 
