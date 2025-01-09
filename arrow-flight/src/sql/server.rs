@@ -75,12 +75,8 @@ pub trait FlightSqlService: Sync + Send + Sized + 'static {
     async fn do_get_fallback(
         &self,
         _request: Request<Ticket>,
-        message: Any,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
-        Err(Status::unimplemented(format!(
-            "do_get: The defined request is invalid: {}",
-            message.type_url
-        )))
+        Err(Status::unimplemented("do_get: The defined request is invalid"))
     }
 
     /// Get a FlightInfo for executing a SQL query.
@@ -378,12 +374,8 @@ pub trait FlightSqlService: Sync + Send + Sized + 'static {
     async fn do_put_fallback(
         &self,
         _request: Request<PeekableFlightDataStream>,
-        message: Any,
     ) -> Result<Response<<Self as FlightService>::DoPutStream>, Status> {
-        Err(Status::unimplemented(format!(
-            "do_put: The defined request is invalid: {}",
-            message.type_url
-        )))
+        Err(Status::unimplemented("do_put: The defined request is invalid"))
     }
 
     /// Execute an update SQL statement.
@@ -665,37 +657,40 @@ where
         &self,
         request: Request<Ticket>,
     ) -> Result<Response<Self::DoGetStream>, Status> {
-        let msg: Any =
-            Message::decode(&*request.get_ref().ticket).map_err(decode_error_to_status)?;
+        let msg_result: Result<Any, Status> =
+            Message::decode(&*request.get_ref().ticket).map_err(decode_error_to_status);
 
-        match Command::try_from(msg).map_err(arrow_error_to_status)? {
-            Command::TicketStatementQuery(command) => self.do_get_statement(command, request).await,
-            Command::CommandPreparedStatementQuery(command) => {
-                self.do_get_prepared_statement(command, request).await
+        match msg_result {
+            Err(_) => self.do_get_fallback(request).await,
+            Ok(msg) => match Command::try_from(msg).map_err(arrow_error_to_status)? {
+                Command::TicketStatementQuery(command) => self.do_get_statement(command, request).await,
+                Command::CommandPreparedStatementQuery(command) => {
+                    self.do_get_prepared_statement(command, request).await
+                }
+                Command::CommandGetCatalogs(command) => self.do_get_catalogs(command, request).await,
+                Command::CommandGetDbSchemas(command) => self.do_get_schemas(command, request).await,
+                Command::CommandGetTables(command) => self.do_get_tables(command, request).await,
+                Command::CommandGetTableTypes(command) => {
+                    self.do_get_table_types(command, request).await
+                }
+                Command::CommandGetSqlInfo(command) => self.do_get_sql_info(command, request).await,
+                Command::CommandGetPrimaryKeys(command) => {
+                    self.do_get_primary_keys(command, request).await
+                }
+                Command::CommandGetExportedKeys(command) => {
+                    self.do_get_exported_keys(command, request).await
+                }
+                Command::CommandGetImportedKeys(command) => {
+                    self.do_get_imported_keys(command, request).await
+                }
+                Command::CommandGetCrossReference(command) => {
+                    self.do_get_cross_reference(command, request).await
+                }
+                Command::CommandGetXdbcTypeInfo(command) => {
+                    self.do_get_xdbc_type_info(command, request).await
+                }
+                _ => self.do_get_fallback(request).await,
             }
-            Command::CommandGetCatalogs(command) => self.do_get_catalogs(command, request).await,
-            Command::CommandGetDbSchemas(command) => self.do_get_schemas(command, request).await,
-            Command::CommandGetTables(command) => self.do_get_tables(command, request).await,
-            Command::CommandGetTableTypes(command) => {
-                self.do_get_table_types(command, request).await
-            }
-            Command::CommandGetSqlInfo(command) => self.do_get_sql_info(command, request).await,
-            Command::CommandGetPrimaryKeys(command) => {
-                self.do_get_primary_keys(command, request).await
-            }
-            Command::CommandGetExportedKeys(command) => {
-                self.do_get_exported_keys(command, request).await
-            }
-            Command::CommandGetImportedKeys(command) => {
-                self.do_get_imported_keys(command, request).await
-            }
-            Command::CommandGetCrossReference(command) => {
-                self.do_get_cross_reference(command, request).await
-            }
-            Command::CommandGetXdbcTypeInfo(command) => {
-                self.do_get_xdbc_type_info(command, request).await
-            }
-            cmd => self.do_get_fallback(request, cmd.into_any()).await,
         }
     }
 
@@ -710,55 +705,63 @@ where
         // we wrap this stream in a `Peekable` one, which allows us to peek at
         // the first message without discarding it.
         let mut request = request.map(PeekableFlightDataStream::new);
-        let cmd = Pin::new(request.get_mut()).peek().await.unwrap().clone()?;
+        let cmd_opt = Pin::new(request.get_mut()).peek().await.map(|x| x.clone());
 
-        let message =
-            Any::decode(&*cmd.flight_descriptor.unwrap().cmd).map_err(decode_error_to_status)?;
-        match Command::try_from(message).map_err(arrow_error_to_status)? {
-            Command::CommandStatementUpdate(command) => {
-                let record_count = self.do_put_statement_update(command, request).await?;
-                let result = DoPutUpdateResult { record_count };
-                let output = futures::stream::iter(vec![Ok(PutResult {
-                    app_metadata: result.as_any().encode_to_vec().into(),
-                })]);
-                Ok(Response::new(Box::pin(output)))
+        if let Some(Ok(cmd)) = cmd_opt {
+            let message_result =
+                Any::decode(&*cmd.flight_descriptor.unwrap().cmd).map_err(decode_error_to_status);
+
+            match message_result {
+                Err(_) => self.do_put_fallback(request).await,
+                Ok(message) => match Command::try_from(message).map_err(arrow_error_to_status)? {
+                    Command::CommandStatementUpdate(command) => {
+                        let record_count = self.do_put_statement_update(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandStatementIngest(command) => {
+                        let record_count = self.do_put_statement_ingest(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandPreparedStatementQuery(command) => {
+                        let result = self
+                            .do_put_prepared_statement_query(command, request)
+                            .await?;
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandStatementSubstraitPlan(command) => {
+                        let record_count = self.do_put_substrait_plan(command, request).await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    Command::CommandPreparedStatementUpdate(command) => {
+                        let record_count = self
+                            .do_put_prepared_statement_update(command, request)
+                            .await?;
+                        let result = DoPutUpdateResult { record_count };
+                        let output = futures::stream::iter(vec![Ok(PutResult {
+                            app_metadata: result.as_any().encode_to_vec().into(),
+                        })]);
+                        Ok(Response::new(Box::pin(output)))
+                    }
+                    _ => self.do_put_fallback(request).await,
+                }
             }
-            Command::CommandStatementIngest(command) => {
-                let record_count = self.do_put_statement_ingest(command, request).await?;
-                let result = DoPutUpdateResult { record_count };
-                let output = futures::stream::iter(vec![Ok(PutResult {
-                    app_metadata: result.as_any().encode_to_vec().into(),
-                })]);
-                Ok(Response::new(Box::pin(output)))
-            }
-            Command::CommandPreparedStatementQuery(command) => {
-                let result = self
-                    .do_put_prepared_statement_query(command, request)
-                    .await?;
-                let output = futures::stream::iter(vec![Ok(PutResult {
-                    app_metadata: result.encode_to_vec().into(),
-                })]);
-                Ok(Response::new(Box::pin(output)))
-            }
-            Command::CommandStatementSubstraitPlan(command) => {
-                let record_count = self.do_put_substrait_plan(command, request).await?;
-                let result = DoPutUpdateResult { record_count };
-                let output = futures::stream::iter(vec![Ok(PutResult {
-                    app_metadata: result.as_any().encode_to_vec().into(),
-                })]);
-                Ok(Response::new(Box::pin(output)))
-            }
-            Command::CommandPreparedStatementUpdate(command) => {
-                let record_count = self
-                    .do_put_prepared_statement_update(command, request)
-                    .await?;
-                let result = DoPutUpdateResult { record_count };
-                let output = futures::stream::iter(vec![Ok(PutResult {
-                    app_metadata: result.as_any().encode_to_vec().into(),
-                })]);
-                Ok(Response::new(Box::pin(output)))
-            }
-            cmd => self.do_put_fallback(request, cmd.into_any()).await,
+        } else {
+            self.do_put_fallback(request).await
         }
     }
 
