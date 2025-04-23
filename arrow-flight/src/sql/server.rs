@@ -602,7 +602,21 @@ where
         &self,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
-        let message = Any::decode(&*request.get_ref().cmd).map_err(decode_error_to_status)?;
+        let message: Any =
+            match Message::decode(&*request.get_ref().cmd).map_err(decode_error_to_status) {
+                Ok(msg) => msg,
+                Err(_) => {
+                    return self
+                        .get_flight_info_fallback(
+                            Command::Unknown(Any {
+                                type_url: "".to_string(),
+                                value: bytes::Bytes::new(),
+                            }),
+                            request,
+                        )
+                        .await
+                }
+            };
 
         match Command::try_from(message).map_err(arrow_error_to_status)? {
             Command::CommandStatementQuery(token) => {
@@ -668,10 +682,17 @@ where
         let msg: Any =
             match Message::decode(&*request.get_ref().ticket).map_err(decode_error_to_status) {
                 Ok(msg) => msg,
-                Err(_) => return self.do_get_fallback(request, Any {
-                    type_url: "".to_string(),
-                    value: bytes::Bytes::new(),
-                }).await,
+                Err(_) => {
+                    return self
+                        .do_get_fallback(
+                            request,
+                            Any {
+                                type_url: "".to_string(),
+                                value: bytes::Bytes::new(),
+                            },
+                        )
+                        .await
+                }
             };
 
         match Command::try_from(msg).map_err(arrow_error_to_status)? {
@@ -718,14 +739,22 @@ where
         let mut request = request.map(PeekableFlightDataStream::new);
         let cmd = Pin::new(request.get_mut()).peek().await.unwrap().clone()?;
 
-        let message =
-            match Any::decode(&*cmd.flight_descriptor.unwrap().cmd).map_err(decode_error_to_status) {
-                Ok(msg) => msg,
-                Err(_) => return self.do_put_fallback(request, Any {
-                    type_url: "".to_string(),
-                    value: bytes::Bytes::new(),
-                }).await,
-            };
+        let message = match Any::decode(&*cmd.flight_descriptor.unwrap().cmd)
+            .map_err(decode_error_to_status)
+        {
+            Ok(msg) => msg,
+            Err(_) => {
+                return self
+                    .do_put_fallback(
+                        request,
+                        Any {
+                            type_url: "".to_string(),
+                            value: bytes::Bytes::new(),
+                        },
+                    )
+                    .await
+            }
+        };
         match Command::try_from(message).map_err(arrow_error_to_status)? {
             Command::CommandStatementUpdate(command) => {
                 let record_count = self.do_put_statement_update(command, request).await?;
