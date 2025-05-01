@@ -737,7 +737,11 @@ where
         // we wrap this stream in a `Peekable` one, which allows us to peek at
         // the first message without discarding it.
         let mut request = request.map(PeekableFlightDataStream::new);
-        let cmd = Pin::new(request.get_mut()).peek().await.unwrap().clone()?;
+        let cmd = Pin::new(request.get_mut())
+            .peek()
+            .await
+            .ok_or_else(|| Status::invalid_argument("Empty stream"))?
+            .clone()?;
 
         let message = match Any::decode(&*cmd.flight_descriptor.unwrap().cmd)
             .map_err(decode_error_to_status)
