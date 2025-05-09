@@ -636,7 +636,7 @@ impl ParquetMetaDataReader {
 
         let suffix = fetch.fetch(footer_start..file_size).await?;
         let suffix_len = suffix.len();
-        let fetch_len = (file_size - footer_start)
+        let fetch_len: usize = (file_size - footer_start)
             .try_into()
             .expect("footer size should never be larger than u32");
         if suffix_len < fetch_len {
