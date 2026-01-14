@@ -36,10 +36,10 @@
 use std::fs::File;
 
 use arrow_array::RecordBatchReader;
-use clap::{builder::PossibleValue, Parser, ValueEnum};
+use clap::{Parser, ValueEnum, builder::PossibleValue};
 use parquet::{
-    arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ArrowWriter},
-    basic::{Compression, Encoding},
+    arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder},
+    basic::{BrotliLevel, Compression, Encoding, GzipLevel, ZstdLevel},
     file::{
         properties::{BloomFilterPosition, EnabledStatistics, WriterProperties, WriterVersion},
         reader::FileReader,
@@ -74,18 +74,31 @@ enum CompressionArgs {
     Lz4Raw,
 }
 
-impl From<CompressionArgs> for Compression {
-    fn from(value: CompressionArgs) -> Self {
-        match value {
-            CompressionArgs::None => Self::UNCOMPRESSED,
-            CompressionArgs::Snappy => Self::SNAPPY,
-            CompressionArgs::Gzip => Self::GZIP(Default::default()),
-            CompressionArgs::Lzo => Self::LZO,
-            CompressionArgs::Brotli => Self::BROTLI(Default::default()),
-            CompressionArgs::Lz4 => Self::LZ4,
-            CompressionArgs::Zstd => Self::ZSTD(Default::default()),
-            CompressionArgs::Lz4Raw => Self::LZ4_RAW,
-        }
+fn compression_from_args(codec: CompressionArgs, level: Option<u32>) -> Compression {
+    match codec {
+        CompressionArgs::None => Compression::UNCOMPRESSED,
+        CompressionArgs::Snappy => Compression::SNAPPY,
+        CompressionArgs::Gzip => match level {
+            Some(lvl) => {
+                Compression::GZIP(GzipLevel::try_new(lvl).expect("invalid gzip compression level"))
+            }
+            None => Compression::GZIP(Default::default()),
+        },
+        CompressionArgs::Lzo => Compression::LZO,
+        CompressionArgs::Brotli => match level {
+            Some(lvl) => Compression::BROTLI(
+                BrotliLevel::try_new(lvl).expect("invalid brotli compression level"),
+            ),
+            None => Compression::BROTLI(Default::default()),
+        },
+        CompressionArgs::Lz4 => Compression::LZ4,
+        CompressionArgs::Zstd => match level {
+            Some(lvl) => Compression::ZSTD(
+                ZstdLevel::try_new(lvl as i32).expect("invalid zstd compression level"),
+            ),
+            None => Compression::ZSTD(Default::default()),
+        },
+        CompressionArgs::Lz4Raw => Compression::LZ4_RAW,
     }
 }
 
@@ -219,6 +232,10 @@ struct Args {
     #[clap(long, value_enum)]
     compression: Option<CompressionArgs>,
 
+    /// Compression level for gzip/brotli/zstd.
+    #[clap(long)]
+    compression_level: Option<u32>,
+
     /// Encoding used for all columns, if dictionary is not enabled.
     #[clap(long, value_enum)]
     encoding: Option<EncodingArgs>,
@@ -243,11 +260,24 @@ struct Args {
     #[clap(long)]
     data_page_size_limit: Option<usize>,
 
-    /// Sets max statistics size for all columns.
+    /// Sets the max length of min/max statistics in row group and data page
+    /// header statistics for all columns.
     ///
     /// Applicable only if statistics are enabled.
     #[clap(long)]
-    max_statistics_size: Option<usize>,
+    statistics_truncate_length: Option<usize>,
+
+    /// Sets the max length of min/max statistics in the column index.
+    ///
+    /// Applicable only if statistics are enabled.
+    #[clap(long)]
+    column_index_truncate_length: Option<usize>,
+
+    /// Write statistics to the data page headers?
+    ///
+    /// Setting this true will also enable page level statistics.
+    #[clap(long)]
+    write_page_header_statistics: Option<bool>,
 
     /// Sets whether bloom filter is enabled for all columns.
     #[clap(long)]
@@ -272,6 +302,10 @@ struct Args {
     /// Sets writer version.
     #[clap(long)]
     writer_version: Option<WriterVersionArgs>,
+
+    /// Sets write batch size.
+    #[clap(long)]
+    write_batch_size: Option<usize>,
 
     /// Sets whether to coerce Arrow types to match Parquet specification
     #[clap(long)]
@@ -300,8 +334,10 @@ fn main() {
     .expect("parquet open");
 
     let mut writer_properties_builder = WriterProperties::builder().set_key_value_metadata(kv_md);
+
     if let Some(value) = args.compression {
-        writer_properties_builder = writer_properties_builder.set_compression(value.into());
+        let compression = compression_from_args(value, args.compression_level);
+        writer_properties_builder = writer_properties_builder.set_compression(compression);
     }
 
     // setup encoding
@@ -324,9 +360,16 @@ fn main() {
     if let Some(value) = args.data_page_size_limit {
         writer_properties_builder = writer_properties_builder.set_data_page_size_limit(value);
     }
-    #[allow(deprecated)]
-    if let Some(value) = args.max_statistics_size {
-        writer_properties_builder = writer_properties_builder.set_max_statistics_size(value);
+    if let Some(value) = args.dictionary_page_size_limit {
+        writer_properties_builder = writer_properties_builder.set_dictionary_page_size_limit(value);
+    }
+    if let Some(value) = args.statistics_truncate_length {
+        writer_properties_builder =
+            writer_properties_builder.set_statistics_truncate_length(Some(value));
+    }
+    if let Some(value) = args.column_index_truncate_length {
+        writer_properties_builder =
+            writer_properties_builder.set_column_index_truncate_length(Some(value));
     }
     if let Some(value) = args.bloom_filter_enabled {
         writer_properties_builder = writer_properties_builder.set_bloom_filter_enabled(value);
@@ -347,11 +390,23 @@ fn main() {
     if let Some(value) = args.statistics_enabled {
         writer_properties_builder = writer_properties_builder.set_statistics_enabled(value.into());
     }
+    // set this after statistics_enabled
+    if let Some(value) = args.write_page_header_statistics {
+        writer_properties_builder =
+            writer_properties_builder.set_write_page_header_statistics(value);
+        if value {
+            writer_properties_builder =
+                writer_properties_builder.set_statistics_enabled(EnabledStatistics::Page);
+        }
+    }
     if let Some(value) = args.writer_version {
         writer_properties_builder = writer_properties_builder.set_writer_version(value.into());
     }
     if let Some(value) = args.coerce_types {
         writer_properties_builder = writer_properties_builder.set_coerce_types(value);
+    }
+    if let Some(value) = args.write_batch_size {
+        writer_properties_builder = writer_properties_builder.set_write_batch_size(value);
     }
     let writer_properties = writer_properties_builder.build();
     let mut parquet_writer = ArrowWriter::try_new(

@@ -20,7 +20,7 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::ByteViewType;
 use arrow_array::{Array, ArrayRef, GenericByteViewArray};
 use arrow_buffer::{Buffer, NullBufferBuilder};
-use arrow_data::ByteView;
+use arrow_data::{ByteView, MAX_INLINE_VIEW_LEN};
 use arrow_schema::ArrowError;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -98,7 +98,10 @@ impl<B: ByteViewType> InProgressByteViewArray<B> {
     /// This is done on write (when we know it is necessary) rather than
     /// eagerly to avoid allocations that are not used.
     fn ensure_capacity(&mut self) {
-        self.views.reserve(self.batch_size);
+        if self.views.capacity() == 0 {
+            self.views.reserve(self.batch_size);
+        }
+        debug_assert_eq!(self.views.capacity(), self.batch_size);
     }
 
     /// Finishes in progress buffer, if any
@@ -125,7 +128,7 @@ impl<B: ByteViewType> InProgressByteViewArray<B> {
             // If there are buffers, we need to update the buffer index
             let updated_views = views.iter().map(|v| {
                 let mut byte_view = ByteView::from(*v);
-                if byte_view.length > 12 {
+                if byte_view.length > MAX_INLINE_VIEW_LEN {
                     // Small views (<=12 bytes) are inlined, so only need to update large views
                     byte_view.buffer_index += starting_buffer;
                 };
@@ -182,7 +185,7 @@ impl<B: ByteViewType> InProgressByteViewArray<B> {
             if remaining_capacity < str_len as usize {
                 break;
             }
-            if str_len > 12 {
+            if str_len > MAX_INLINE_VIEW_LEN {
                 remaining_capacity -= str_len as usize;
             }
             num_view_to_current += 1;
@@ -233,7 +236,7 @@ impl<B: ByteViewType> InProgressByteViewArray<B> {
                 .iter()
                 .filter_map(|v| {
                     let b = ByteView::from(*v);
-                    if b.length > 12 {
+                    if b.length > MAX_INLINE_VIEW_LEN {
                         Some(b.length as usize)
                     } else {
                         None
@@ -251,7 +254,7 @@ impl<B: ByteViewType> InProgressByteViewArray<B> {
         // Copy the views, updating the buffer index and copying the data as needed
         let new_views = views.iter().map(|v| {
             let mut b: ByteView = ByteView::from(*v);
-            if b.length > 12 {
+            if b.length > MAX_INLINE_VIEW_LEN {
                 let buffer_index = b.buffer_index as usize;
                 let buffer_offset = b.offset as usize;
                 let str_len = b.length as usize;
@@ -284,7 +287,10 @@ impl<B: ByteViewType> InProgressArray for InProgressByteViewArray<B> {
                 (false, 0)
             } else {
                 let ideal_buffer_size = s.total_buffer_bytes_used();
-                let actual_buffer_size = s.get_buffer_memory_size();
+                // We don't use get_buffer_memory_size here, because gc is for the contents of the
+                // data buffers, not views and nulls.
+                let actual_buffer_size =
+                    s.data_buffers().iter().map(|b| b.capacity()).sum::<usize>();
                 // copying strings is expensive, so only do it if the array is
                 // sparse (uses at least 2x the memory it needs)
                 let need_gc =

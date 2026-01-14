@@ -15,19 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use super::{ArrayData, Extend, _MutableArrayData};
+use super::{_MutableArrayData, ArrayData, Extend};
 use arrow_buffer::{ArrowNativeType, Buffer, ToByteSlice};
 use arrow_schema::DataType;
-use num::CheckedAdd;
+use num_traits::CheckedAdd;
 
 /// Generic helper to get the last run end value from a run ends array
 fn get_last_run_end<T: ArrowNativeType>(run_ends_data: &super::MutableArrayData) -> T {
     if run_ends_data.data.len == 0 {
         T::default()
     } else {
-        // Convert buffer to typed slice and get the last element
-        let buffer = Buffer::from(run_ends_data.data.buffer1.as_slice());
-        let typed_slice: &[T] = buffer.typed_data();
+        let typed_slice: &[T] = run_ends_data.data.buffer1.typed_data();
         if typed_slice.len() >= run_ends_data.data.len {
             typed_slice[run_ends_data.data.len - 1]
         } else {
@@ -75,10 +73,7 @@ pub fn extend_nulls(mutable: &mut _MutableArrayData, len: usize) {
         DataType::Int16 => extend_nulls_impl!(i16),
         DataType::Int32 => extend_nulls_impl!(i32),
         DataType::Int64 => extend_nulls_impl!(i64),
-        _ => panic!(
-            "Invalid run end type for RunEndEncoded array: {:?}",
-            run_end_type
-        ),
+        _ => panic!("Invalid run end type for RunEndEncoded array: {run_end_type}"),
     };
 
     mutable.child_data[0].data.len += 1;
@@ -184,7 +179,7 @@ fn process_extends_batch<T: ArrowNativeType>(
 /// Returns a function that extends the run encoded array.
 ///
 /// It finds the physical indices in the source array that correspond to the logical range to copy, and adjusts the runs to the logical indices of the array to extend. The values are copied from the source array to the destination array verbatim.
-pub fn build_extend(array: &ArrayData) -> Extend {
+pub fn build_extend(array: &ArrayData) -> Extend<'_> {
     Box::new(
         move |mutable: &mut _MutableArrayData, array_idx: usize, start: usize, len: usize| {
             if len == 0 {
@@ -211,7 +206,7 @@ pub fn build_extend(array: &ArrayData) -> Extend {
                     let (run_ends_bytes, values_range) = build_extend_arrays::<$run_end_type>(
                         source_buffer,
                         source_run_ends.len(),
-                        start,
+                        start + array.offset(),
                         len,
                         dest_last_run_end,
                     );
@@ -228,10 +223,7 @@ pub fn build_extend(array: &ArrayData) -> Extend {
                 DataType::Int16 => build_and_process_impl!(i16),
                 DataType::Int32 => build_and_process_impl!(i32),
                 DataType::Int64 => build_and_process_impl!(i64),
-                _ => panic!(
-                    "Invalid run end type for RunEndEncoded array: {:?}",
-                    dest_run_end_type
-                ),
+                _ => panic!("Invalid run end type for RunEndEncoded array: {dest_run_end_type}",),
             }
         },
     )

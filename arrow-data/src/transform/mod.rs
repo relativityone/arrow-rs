@@ -20,19 +20,20 @@
 //! Provides utilities for creating, manipulating, and converting Arrow arrays
 //! made of primitive types, strings, and nested types.
 
-use super::{data::new_buffers, ArrayData, ArrayDataBuilder, ByteView};
+use super::{ArrayData, ArrayDataBuilder, ByteView, data::new_buffers};
 use crate::bit_mask::set_bits;
 use arrow_buffer::buffer::{BooleanBuffer, NullBuffer};
-use arrow_buffer::{bit_util, i256, ArrowNativeType, Buffer, MutableBuffer};
+use arrow_buffer::{ArrowNativeType, Buffer, MutableBuffer, bit_util, i256};
 use arrow_schema::{ArrowError, DataType, IntervalUnit, UnionMode};
 use half::f16;
-use num::Integer;
+use num_integer::Integer;
 use std::mem;
 
 mod boolean;
 mod fixed_binary;
 mod fixed_size_list;
 mod list;
+mod list_view;
 mod null;
 mod primitive;
 mod run;
@@ -73,7 +74,7 @@ impl _MutableArrayData<'_> {
     }
 }
 
-fn build_extend_null_bits(array: &ArrayData, use_nulls: bool) -> ExtendNullBits {
+fn build_extend_null_bits(array: &ArrayData, use_nulls: bool) -> ExtendNullBits<'_> {
     if let Some(nulls) = array.nulls() {
         let bytes = nulls.validity();
         Box::new(move |mutable, start, len| {
@@ -190,7 +191,7 @@ impl std::fmt::Debug for MutableArrayData<'_> {
 /// Builds an extend that adds `offset` to the source primitive
 /// Additionally validates that `max` fits into the
 /// the underlying primitive returning None if not
-fn build_extend_dictionary(array: &ArrayData, offset: usize, max: usize) -> Option<Extend> {
+fn build_extend_dictionary(array: &ArrayData, offset: usize, max: usize) -> Option<Extend<'_>> {
     macro_rules! validate_and_build {
         ($dt: ty) => {{
             let _: $dt = max.try_into().ok()?;
@@ -215,7 +216,7 @@ fn build_extend_dictionary(array: &ArrayData, offset: usize, max: usize) -> Opti
 }
 
 /// Builds an extend that adds `buffer_offset` to any buffer indices encountered
-fn build_extend_view(array: &ArrayData, buffer_offset: u32) -> Extend {
+fn build_extend_view(array: &ArrayData, buffer_offset: u32) -> Extend<'_> {
     let views = array.buffer::<u128>(0);
     Box::new(
         move |mutable: &mut _MutableArrayData, _, start: usize, len: usize| {
@@ -234,7 +235,7 @@ fn build_extend_view(array: &ArrayData, buffer_offset: u32) -> Extend {
     )
 }
 
-fn build_extend(array: &ArrayData) -> Extend {
+fn build_extend(array: &ArrayData) -> Extend<'_> {
     match array.data_type() {
         DataType::Null => null::build_extend(array),
         DataType::Boolean => boolean::build_extend(array),
@@ -257,16 +258,17 @@ fn build_extend(array: &ArrayData) -> Extend {
         | DataType::Duration(_)
         | DataType::Interval(IntervalUnit::DayTime) => primitive::build_extend::<i64>(array),
         DataType::Interval(IntervalUnit::MonthDayNano) => primitive::build_extend::<i128>(array),
+        DataType::Decimal32(_, _) => primitive::build_extend::<i32>(array),
+        DataType::Decimal64(_, _) => primitive::build_extend::<i64>(array),
         DataType::Decimal128(_, _) => primitive::build_extend::<i128>(array),
         DataType::Decimal256(_, _) => primitive::build_extend::<i256>(array),
         DataType::Utf8 | DataType::Binary => variable_size::build_extend::<i32>(array),
         DataType::LargeUtf8 | DataType::LargeBinary => variable_size::build_extend::<i64>(array),
         DataType::BinaryView | DataType::Utf8View => unreachable!("should use build_extend_view"),
         DataType::Map(_, _) | DataType::List(_) => list::build_extend::<i32>(array),
-        DataType::ListView(_) | DataType::LargeListView(_) => {
-            unimplemented!("ListView/LargeListView not implemented")
-        }
         DataType::LargeList(_) => list::build_extend::<i64>(array),
+        DataType::ListView(_) => list_view::build_extend::<i32>(array),
+        DataType::LargeListView(_) => list_view::build_extend::<i64>(array),
         DataType::Dictionary(_, _) => unreachable!("should use build_extend_dictionary"),
         DataType::Struct(_) => structure::build_extend(array),
         DataType::FixedSizeBinary(_) => fixed_binary::build_extend(array),
@@ -303,16 +305,17 @@ fn build_extend_nulls(data_type: &DataType) -> ExtendNulls {
         | DataType::Duration(_)
         | DataType::Interval(IntervalUnit::DayTime) => primitive::extend_nulls::<i64>,
         DataType::Interval(IntervalUnit::MonthDayNano) => primitive::extend_nulls::<i128>,
+        DataType::Decimal32(_, _) => primitive::extend_nulls::<i32>,
+        DataType::Decimal64(_, _) => primitive::extend_nulls::<i64>,
         DataType::Decimal128(_, _) => primitive::extend_nulls::<i128>,
         DataType::Decimal256(_, _) => primitive::extend_nulls::<i256>,
         DataType::Utf8 | DataType::Binary => variable_size::extend_nulls::<i32>,
         DataType::LargeUtf8 | DataType::LargeBinary => variable_size::extend_nulls::<i64>,
         DataType::BinaryView | DataType::Utf8View => primitive::extend_nulls::<u128>,
         DataType::Map(_, _) | DataType::List(_) => list::extend_nulls::<i32>,
-        DataType::ListView(_) | DataType::LargeListView(_) => {
-            unimplemented!("ListView/LargeListView not implemented")
-        }
         DataType::LargeList(_) => list::extend_nulls::<i64>,
+        DataType::ListView(_) => list_view::extend_nulls::<i32>,
+        DataType::LargeListView(_) => list_view::extend_nulls::<i64>,
         DataType::Dictionary(child_data_type, _) => match child_data_type.as_ref() {
             DataType::UInt8 => primitive::extend_nulls::<u8>,
             DataType::UInt16 => primitive::extend_nulls::<u16>,
@@ -446,7 +449,11 @@ impl<'a> MutableArrayData<'a> {
                 new_buffers(data_type, *capacity)
             }
             (
-                DataType::List(_) | DataType::LargeList(_) | DataType::FixedSizeList(_, _),
+                DataType::List(_)
+                | DataType::LargeList(_)
+                | DataType::ListView(_)
+                | DataType::LargeListView(_)
+                | DataType::FixedSizeList(_, _),
                 Capacities::List(capacity, _),
             ) => {
                 array_capacity = *capacity;
@@ -456,7 +463,9 @@ impl<'a> MutableArrayData<'a> {
         };
 
         let child_data = match &data_type {
-            DataType::Decimal128(_, _)
+            DataType::Decimal32(_, _)
+            | DataType::Decimal64(_, _)
+            | DataType::Decimal128(_, _)
             | DataType::Decimal256(_, _)
             | DataType::Null
             | DataType::Boolean
@@ -485,10 +494,11 @@ impl<'a> MutableArrayData<'a> {
             | DataType::Utf8View
             | DataType::Interval(_)
             | DataType::FixedSizeBinary(_) => vec![],
-            DataType::ListView(_) | DataType::LargeListView(_) => {
-                unimplemented!("ListView/LargeListView not implemented")
-            }
-            DataType::Map(_, _) | DataType::List(_) | DataType::LargeList(_) => {
+            DataType::Map(_, _)
+            | DataType::List(_)
+            | DataType::LargeList(_)
+            | DataType::ListView(_)
+            | DataType::LargeListView(_) => {
                 let children = arrays
                     .iter()
                     .map(|array| &array.child_data()[0])
@@ -779,7 +789,12 @@ impl<'a> MutableArrayData<'a> {
                 b.insert(0, data.buffer1.into());
                 b
             }
-            DataType::Utf8 | DataType::Binary | DataType::LargeUtf8 | DataType::LargeBinary => {
+            DataType::Utf8
+            | DataType::Binary
+            | DataType::LargeUtf8
+            | DataType::LargeBinary
+            | DataType::ListView(_)
+            | DataType::LargeListView(_) => {
                 vec![data.buffer1.into(), data.buffer2.into()]
             }
             DataType::Union(_, mode) => {
