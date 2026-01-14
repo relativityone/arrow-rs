@@ -40,6 +40,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt, stream::Peekable};
 use prost::Message;
+use prost_types::field_descriptor_proto::Type::Message;
 use tonic::{Request, Response, Status, Streaming};
 
 pub(crate) static CREATE_PREPARED_STATEMENT: &str = "CreatePreparedStatement";
@@ -760,10 +761,8 @@ where
                 .do_put_error_callback(request, DoPutError::MissingFlightDescriptor)
                 .await;
         };
-        let message = Any::decode(flight_descriptor.cmd).map_err(decode_error_to_status)?;
-        let message = match Any::decode(&*cmd.flight_descriptor.unwrap().cmd)
-            .map_err(decode_error_to_status)
-        {
+        let message = Any =
+            match Message::decode(flight_descriptor.cmd).map_err(decode_error_to_status){
             Ok(msg) => msg,
             Err(_) => {
                 return self
