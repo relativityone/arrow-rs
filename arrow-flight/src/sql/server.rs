@@ -40,6 +40,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt, stream::Peekable};
 use prost::Message;
+use prost_types::field_descriptor_proto::Type::Message;
 use tonic::{Request, Response, Status, Streaming};
 
 pub(crate) static CREATE_PREPARED_STATEMENT: &str = "CreatePreparedStatement";
@@ -623,7 +624,7 @@ where
                             }),
                             request,
                         )
-                        .await
+                        .await;
                 }
             };
 
@@ -700,7 +701,7 @@ where
                                 value: bytes::Bytes::new(),
                             },
                         )
-                        .await
+                        .await;
                 }
             };
 
@@ -760,23 +761,21 @@ where
                 .do_put_error_callback(request, DoPutError::MissingFlightDescriptor)
                 .await;
         };
-        let message = Any::decode(flight_descriptor.cmd).map_err(decode_error_to_status)?;
-        let message = match Any::decode(&*cmd.flight_descriptor.unwrap().cmd)
-            .map_err(decode_error_to_status)
-        {
-            Ok(msg) => msg,
-            Err(_) => {
-                return self
-                    .do_put_fallback(
-                        request,
-                        Any {
-                            type_url: "".to_string(),
-                            value: bytes::Bytes::new(),
-                        },
-                    )
-                    .await
-            }
-        };
+        let message = Any =
+            match Message::decode(flight_descriptor.cmd).map_err(decode_error_to_status) {
+                Ok(msg) => msg,
+                Err(_) => {
+                    return self
+                        .do_put_fallback(
+                            request,
+                            Any {
+                                type_url: "".to_string(),
+                                value: bytes::Bytes::new(),
+                            },
+                        )
+                        .await;
+                }
+            };
         match Command::try_from(message).map_err(arrow_error_to_status)? {
             Command::CommandStatementUpdate(command) => {
                 let record_count = self.do_put_statement_update(command, request).await?;

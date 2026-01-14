@@ -47,6 +47,7 @@ pub const NON_EMPTY_SENTINEL: u8 = 2;
 
 /// Returns the length of the encoded representation of a byte array, including the null byte
 #[inline]
+#[allow(dead_code)]
 pub fn encoded_len(a: Option<&[u8]>) -> usize {
     padded_length(a.map(|x| x.len()))
 }
