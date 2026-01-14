@@ -624,7 +624,7 @@ where
                             }),
                             request,
                         )
-                        .await
+                        .await;
                 }
             };
 
@@ -701,7 +701,7 @@ where
                                 value: bytes::Bytes::new(),
                             },
                         )
-                        .await
+                        .await;
                 }
             };
 
@@ -762,20 +762,20 @@ where
                 .await;
         };
         let message = Any =
-            match Message::decode(flight_descriptor.cmd).map_err(decode_error_to_status){
-            Ok(msg) => msg,
-            Err(_) => {
-                return self
-                    .do_put_fallback(
-                        request,
-                        Any {
-                            type_url: "".to_string(),
-                            value: bytes::Bytes::new(),
-                        },
-                    )
-                    .await
-            }
-        };
+            match Message::decode(flight_descriptor.cmd).map_err(decode_error_to_status) {
+                Ok(msg) => msg,
+                Err(_) => {
+                    return self
+                        .do_put_fallback(
+                            request,
+                            Any {
+                                type_url: "".to_string(),
+                                value: bytes::Bytes::new(),
+                            },
+                        )
+                        .await;
+                }
+            };
         match Command::try_from(message).map_err(arrow_error_to_status)? {
             Command::CommandStatementUpdate(command) => {
                 let record_count = self.do_put_statement_update(command, request).await?;
