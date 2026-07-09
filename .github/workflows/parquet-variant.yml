@@ -35,6 +35,9 @@ on:
       - parquet-variant-compute/**
       - .github/**
 
+permissions:
+  contents: read
+
 jobs:
   # test the crate
   linux-test:
