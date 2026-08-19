@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DecodeResult"],"macro":[["experimental",1]],"mod":["arrow","basic","bloom_filter","column","data_type","errors","file","format","parquet_macros","parquet_thrift","record","schema","thrift","utf8","variant"]};
